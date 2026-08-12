@@ -21,6 +21,9 @@ from app.services.case_service import list_agent_cases
 from app.services.case_service import list_cases_for_user
 from app.services.case_service import reopen_case
 from app.services.case_service import update_case
+from app.schemas.case import CaseAssignment
+from app.services.case_service import reassign_case
+from app.services.case_service import get_case_counts
 
 
 router = APIRouter(
@@ -118,6 +121,41 @@ def get_agent_queue(
         page_size=page_size,
     )
 
+@router.patch(
+    "/{case_id}/assignment",
+    response_model=CaseResponse,
+)
+def reassign_existing_case(
+    case_id: int,
+    payload: CaseAssignment,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(
+        require_roles(RoleEnum.ADMIN),
+    ),
+):
+    """
+    Administrators can assign a case to an active agent.
+    """
+    return reassign_case(
+        db=db,
+        case_id=case_id,
+        new_agent_id=payload.agent_id,
+        admin=current_admin,
+    )
+
+@router.get(
+    "/admin/summary",
+)
+def get_admin_case_summary(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(
+        require_roles(RoleEnum.ADMIN),
+    ),
+):
+    """
+    Return case counts for the administrator dashboard.
+    """
+    return get_case_counts(db=db)
 
 @router.get(
     "/{case_id}",

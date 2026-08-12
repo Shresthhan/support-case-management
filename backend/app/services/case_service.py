@@ -504,3 +504,97 @@ def reopen_case(
     db.refresh(case)
 
     return case
+
+def reassign_case(
+    db: Session,
+    case_id: int,
+    new_agent_id: int,
+    admin: User,
+) -> Case:
+    """
+    Reassign a case to another active agent.
+    """
+    case = get_case_by_id(
+        db=db,
+        case_id=case_id,
+    )
+
+    new_agent = db.query(User).filter(
+        User.id == new_agent_id,
+    ).first()
+
+    if new_agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The selected user does not exist.",
+        )
+
+    if new_agent.role != RoleEnum.AGENT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cases can only be assigned to agents.",
+        )
+
+    if not new_agent.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cases cannot be assigned to an inactive agent.",
+        )
+
+    old_agent_id = case.agent_id
+    case.agent_id = new_agent.id
+
+    log_activity(
+        db=db,
+        case_id=case.id,
+        actor_id=admin.id,
+        event_type="case_reassigned",
+        detail=(
+            f"Assignment changed from agent ID "
+            f"{old_agent_id} to agent ID {new_agent.id}."
+        ),
+    )
+
+    db.commit()
+    db.refresh(case)
+
+    return case
+
+def get_case_counts(
+    db: Session,
+) -> dict[str, int]:
+    """
+    Return simple administrator dashboard counts.
+    """
+    current_time = datetime.utcnow()
+
+    open_count = db.query(Case).filter(
+        Case.status.in_(
+            {
+                StatusEnum.OPEN,
+                StatusEnum.IN_PROGRESS,
+                StatusEnum.WAITING_FOR_REQUESTER,
+            },
+        ),
+    ).count()
+
+    overdue_count = db.query(Case).filter(
+        Case.due_date.is_not(None),
+        Case.due_date < current_time,
+        ~Case.status.in_(
+            {
+                StatusEnum.RESOLVED,
+                StatusEnum.CLOSED,
+            },
+        ),
+    ).count()
+
+    resolved_count = db.query(Case).filter(
+        Case.status == StatusEnum.RESOLVED,
+    ).count()
+
+    return {
+        "open": open_count,
+        "overdue": overdue_count,
+        "resolved": resolved_count,
+    }

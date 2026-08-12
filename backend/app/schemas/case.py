@@ -57,3 +57,6 @@ class CaseListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+class CaseAssignment(BaseModel):
+    agent_id: int
