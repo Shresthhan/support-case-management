@@ -1,3 +1,4 @@
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
@@ -9,12 +10,6 @@ def authenticate_user(
     email: str,
     password: str,
 ) -> User | None:
-    """
-    Find a user by email and verify their password.
-
-    Returns the user if authentication succeeds.
-    Returns None if authentication fails.
-    """
     user = db.query(User).filter(
         User.email == email,
     ).first()
@@ -29,6 +24,9 @@ def authenticate_user(
         return None
 
     if not user.is_active:
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This user account is inactive.",
+        )
 
     return user
