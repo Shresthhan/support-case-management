@@ -17,7 +17,7 @@ def add_public_reply(
     payload: MessageCreate,
 ) -> Message:
     """
-    Add a message that the requester can see.
+    Add a public message visible to the requester.
     """
     case = get_case_by_id(
         db=db,
@@ -37,7 +37,6 @@ def add_public_reply(
     )
 
     db.add(message)
-
     db.flush()
 
     log_activity(
@@ -49,7 +48,6 @@ def add_public_reply(
     )
 
     db.commit()
-
     db.refresh(message)
 
     return message
@@ -62,7 +60,7 @@ def add_internal_note(
     payload: MessageCreate,
 ) -> Message:
     """
-    Add an internal note that requesters must not see.
+    Add an internal note visible only to agents and administrators.
     """
     if author.role not in {
         RoleEnum.AGENT,
@@ -70,7 +68,10 @@ def add_internal_note(
     }:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only agents and administrators can add internal notes.",
+            detail=(
+                "Only agents and administrators can "
+                "add internal notes."
+            ),
         )
 
     case = get_case_by_id(
@@ -86,7 +87,6 @@ def add_internal_note(
     )
 
     db.add(message)
-
     db.flush()
 
     log_activity(
@@ -98,7 +98,6 @@ def add_internal_note(
     )
 
     db.commit()
-
     db.refresh(message)
 
     return message

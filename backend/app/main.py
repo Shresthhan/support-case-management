@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.api.routes import auth
 from app.api.routes import cases
+from app.api.routes import messages
 
 
 app = FastAPI(
@@ -12,6 +13,7 @@ app = FastAPI(
 
 app.include_router(auth.router)
 app.include_router(cases.router)
+app.include_router(messages.router)
 
 
 @app.get("/health")
