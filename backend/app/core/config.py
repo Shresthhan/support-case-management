@@ -13,6 +13,11 @@ class Settings(BaseSettings):
 
     access_token_expire_minutes: int = 60
 
+    triage_provider: str = "mock"
+    ai_api_key: str | None = None
+    ai_api_base_url: str | None = None
+    ai_model: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from app.models.case import CategoryEnum, PriorityEnum
 
 
-class TriageSuggestion(BaseModel):
+class TriageSuggestionResponse(BaseModel):
     category: CategoryEnum
     priority: PriorityEnum
 
@@ -16,3 +16,9 @@ class TriageSuggestion(BaseModel):
         min_length=1,
         max_length=1000,
     )
+
+
+class TriageApplyRequest(BaseModel):
+    apply_category: bool = True
+    apply_priority: bool = True
+    apply_summary: bool = False

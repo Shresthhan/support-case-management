@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.routes import auth
 from app.api.routes import cases
 from app.api.routes import messages
+from app.api.routes import triage
 from app.api.routes import users
 
 
@@ -16,6 +17,7 @@ app.include_router(auth.router)
 app.include_router(cases.router)
 app.include_router(messages.router)
 app.include_router(users.router)
+app.include_router(triage.router)
 
 
 @app.get("/health")
