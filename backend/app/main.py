@@ -1,9 +1,22 @@
 from fastapi import FastAPI
 
+from app.api.routes import auth
+from app.api.routes import cases
 
-app = FastAPI(title="Support Case Management API")
+
+app = FastAPI(
+    title="Support Case Management API",
+    version="1.0.0",
+)
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {"status": "ok"}
+app.include_router(auth.router)
+app.include_router(cases.router)
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "message": "Support Case Management API is running.",
+    }
