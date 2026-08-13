@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.case import Case, StatusEnum
 from app.models.user import RoleEnum, User
+from app.core.time import utc_now
 from app.schemas.case import CaseCreate, CaseUpdate
 from app.services.activity_service import log_activity
 
@@ -31,7 +32,7 @@ def create_case(
     requester: User,
     payload: CaseCreate,
 ) -> Case:
-    current_time = datetime.utcnow()
+    current_time = utc_now()
     due_date = normalize_datetime(payload.due_date)
 
     if due_date is not None and due_date < current_time:
@@ -408,7 +409,7 @@ def update_case(
             )
 
         if case.resolved_at is None:
-            case.resolved_at = datetime.utcnow()
+            case.resolved_at = utc_now()
 
             log_activity(
                 db=db,
@@ -475,7 +476,7 @@ def reopen_case(
         days=7,
     )
 
-    if datetime.utcnow() > seven_days_after_resolution:
+    if utc_now() > seven_days_after_resolution:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -566,7 +567,7 @@ def get_case_counts(
     """
     Return simple administrator dashboard counts.
     """
-    current_time = datetime.utcnow()
+    current_time = utc_now()
 
     open_count = db.query(Case).filter(
         Case.status.in_(

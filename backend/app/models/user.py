@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 
 from app.core.database import Base
-
+from app.core.time import utc_now
 
 class RoleEnum(str, enum.Enum):
     REQUESTER = "requester"
@@ -53,5 +53,5 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utc_now,
     )

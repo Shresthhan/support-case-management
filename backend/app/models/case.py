@@ -14,6 +14,7 @@ from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+from app.core.time import utc_now
 
 
 class CategoryEnum(str, enum.Enum):
@@ -97,14 +98,14 @@ class Case(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utc_now,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utc_now,
+        onupdate=utc_now,
     )
 
     due_date: Mapped[datetime | None] = mapped_column(
