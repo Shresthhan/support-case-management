@@ -707,49 +707,47 @@ def get_case_counts(
     db: Session,
 ) -> dict[str, int]:
     """
-    Return simple administrator dashboard counts.
+    Return administrator dashboard counts.
     """
-    current_time = utc_now()
+    total_count = db.query(Case).count()
 
-    open_count = (
-        db.query(Case)
-        .filter(
-            Case.status.in_(
-                {
-                    StatusEnum.OPEN,
-                    StatusEnum.IN_PROGRESS,
-                    StatusEnum.WAITING_FOR_REQUESTER,
-                },
-            ),
-        )
-        .count()
-    )
+    open_count = db.query(Case).filter(
+        Case.status == StatusEnum.OPEN,
+    ).count()
 
-    overdue_count = (
-        db.query(Case)
-        .filter(
-            Case.due_date.is_not(None),
-            Case.due_date < current_time,
-            ~Case.status.in_(
-                {
-                    StatusEnum.RESOLVED,
-                    StatusEnum.CLOSED,
-                },
-            ),
-        )
-        .count()
-    )
+    in_progress_count = db.query(Case).filter(
+        Case.status == StatusEnum.IN_PROGRESS,
+    ).count()
 
-    resolved_count = (
-        db.query(Case)
-        .filter(
-            Case.status == StatusEnum.RESOLVED,
-        )
-        .count()
-    )
+    waiting_for_requester_count = db.query(Case).filter(
+        Case.status == StatusEnum.WAITING_FOR_REQUESTER,
+    ).count()
+
+    resolved_count = db.query(Case).filter(
+        Case.status == StatusEnum.RESOLVED,
+    ).count()
+
+    closed_count = db.query(Case).filter(
+        Case.status == StatusEnum.CLOSED,
+    ).count()
+
+    overdue_count = db.query(Case).filter(
+        Case.due_date.is_not(None),
+        Case.due_date < utc_now(),
+        ~Case.status.in_(
+            {
+                StatusEnum.RESOLVED,
+                StatusEnum.CLOSED,
+            },
+        ),
+    ).count()
 
     return {
+        "total": total_count,
         "open": open_count,
-        "overdue": overdue_count,
+        "in_progress": in_progress_count,
+        "waiting_for_requester": waiting_for_requester_count,
         "resolved": resolved_count,
+        "closed": closed_count,
+        "overdue": overdue_count,
     }
