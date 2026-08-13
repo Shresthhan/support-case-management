@@ -1,6 +1,7 @@
 import streamlit as st
 
 from api_client.cases_api import create_case
+from api_client.agent_api import list_agent_queue
 from api_client.cases_api import list_cases
 from api_client.client import ApiClient
 
@@ -136,7 +137,13 @@ api = ApiClient(
 st.subheader("Your cases")
 
 try:
-    cases = list_cases(api)
+    user = st.session_state.user
+    role = str(user.get("role", "")).lower()
+
+    if role == "agent":
+        cases = list_agent_queue(api)
+    else:
+        cases = list_cases(api)
     display_cases(cases)
 
 except ValueError as error:

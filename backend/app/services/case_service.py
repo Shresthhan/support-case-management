@@ -1,12 +1,18 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
+from fastapi import status
 from sqlalchemy.orm import Session
 
-from app.models.case import Case, StatusEnum
-from app.models.user import RoleEnum, User
 from app.core.time import utc_now
-from app.schemas.case import CaseCreate, CaseUpdate
+from app.models.case import Case
+from app.models.case import StatusEnum
+from app.models.user import RoleEnum
+from app.models.user import User
+from app.schemas.case import CaseCreate
+from app.schemas.case import CaseUpdate
 from app.services.activity_service import log_activity
 
 
@@ -20,7 +26,9 @@ def normalize_datetime(
         return None
 
     if value.tzinfo is not None:
-        return value.astimezone(timezone.utc).replace(
+        return value.astimezone(
+            timezone.utc,
+        ).replace(
             tzinfo=None,
         )
 
@@ -33,12 +41,20 @@ def create_case(
     payload: CaseCreate,
 ) -> Case:
     current_time = utc_now()
-    due_date = normalize_datetime(payload.due_date)
+    due_date = normalize_datetime(
+        payload.due_date,
+    )
 
-    if due_date is not None and due_date < current_time:
+    if (
+        due_date is not None
+        and due_date < current_time
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Due date cannot be earlier than case creation time.",
+            detail=(
+                "Due date cannot be earlier than "
+                "case creation time."
+            ),
         )
 
     case = Case(
@@ -75,9 +91,11 @@ def get_case_by_id(
     db: Session,
     case_id: int,
 ) -> Case:
-    case = db.query(Case).filter(
-        Case.id == case_id,
-    ).first()
+    case = (
+        db.query(Case)
+        .filter(Case.id == case_id)
+        .first()
+    )
 
     if case is None:
         raise HTTPException(
@@ -93,17 +111,53 @@ def check_case_view_permission(
     current_user: User,
 ) -> None:
     """
-    Requesters can only view their own cases.
-    Agents and admins can view cases.
+    Access rules:
+
+    Requester:
+        Can view only their own cases.
+
+    Agent:
+        Can view unassigned cases or cases assigned
+        to themselves.
+
+    Admin:
+        Can view all cases.
     """
-    if (
-        current_user.role == RoleEnum.REQUESTER
-        and case.requester_id != current_user.id
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You cannot access this case.",
+    if current_user.role == RoleEnum.ADMIN:
+        return
+
+    if current_user.role == RoleEnum.REQUESTER:
+        if case.requester_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot access this case.",
+            )
+
+        return
+
+    if current_user.role == RoleEnum.AGENT:
+        case_is_assigned_to_other_agent = (
+            case.agent_id is not None
+            and case.agent_id != current_user.id
         )
+
+        if case_is_assigned_to_other_agent:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "You can view only unassigned cases "
+                    "or cases assigned to you."
+                ),
+            )
+
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "You are not allowed to view this case."
+        ),
+    )
 
 
 def get_case_for_user(
@@ -130,6 +184,18 @@ def list_cases_for_user(
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[Case], int]:
+    """
+    Return cases visible to the current user.
+
+    Requester:
+        Own cases only.
+
+    Agent:
+        Own assigned cases and unassigned cases.
+
+    Admin:
+        All cases.
+    """
     if page < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -139,7 +205,9 @@ def list_cases_for_user(
     if page_size < 1 or page_size > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Page size must be between 1 and 100.",
+            detail=(
+                "Page size must be between 1 and 100."
+            ),
         )
 
     query = db.query(Case)
@@ -149,12 +217,20 @@ def list_cases_for_user(
             Case.requester_id == current_user.id,
         )
 
+    elif current_user.role == RoleEnum.AGENT:
+        query = query.filter(
+            (Case.agent_id == current_user.id)
+            | (Case.agent_id.is_(None))
+        )
+
     total = query.count()
 
     offset = (page - 1) * page_size
 
     cases = (
-        query.order_by(Case.created_at.desc())
+        query.order_by(
+            Case.created_at.desc(),
+        )
         .offset(offset)
         .limit(page_size)
         .all()
@@ -172,6 +248,7 @@ def list_agent_cases(
 ) -> tuple[list[Case], int]:
     """
     Agents can see:
+
     - cases assigned to themselves
     - cases that are not assigned to anyone
     """
@@ -184,7 +261,9 @@ def list_agent_cases(
     if page_size < 1 or page_size > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Page size must be between 1 and 100.",
+            detail=(
+                "Page size must be between 1 and 100."
+            ),
         )
 
     query = db.query(Case).filter(
@@ -202,7 +281,9 @@ def list_agent_cases(
     offset = (page - 1) * page_size
 
     cases = (
-        query.order_by(Case.created_at.desc())
+        query.order_by(
+            Case.created_at.desc(),
+        )
         .offset(offset)
         .limit(page_size)
         .all()
@@ -227,7 +308,10 @@ def claim_case(
     if case.agent_id is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This case is already assigned to an agent.",
+            detail=(
+                "This case is already assigned "
+                "to an agent."
+            ),
         )
 
     if case.status in {
@@ -236,7 +320,10 @@ def claim_case(
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Resolved or closed cases cannot be claimed.",
+            detail=(
+                "Resolved or closed cases cannot "
+                "be claimed."
+            ),
         )
 
     case.agent_id = agent.id
@@ -246,7 +333,9 @@ def claim_case(
         case_id=case.id,
         actor_id=agent.id,
         event_type="case_assigned",
-        detail=f"Case claimed by agent {agent.email}.",
+        detail=(
+            f"Case claimed by agent {agent.email}."
+        ),
     )
 
     db.commit()
@@ -288,7 +377,9 @@ def validate_status_change(
     if new_status == current_status:
         return
 
-    if new_status not in allowed_transitions[current_status]:
+    if new_status not in allowed_transitions[
+        current_status
+    ]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -317,22 +408,33 @@ def update_case(
         if case.agent_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can update only cases assigned to you.",
+                detail=(
+                    "You can update only cases "
+                    "assigned to you."
+                ),
             )
 
     if current_user.role == RoleEnum.REQUESTER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Requesters cannot update case management fields.",
+            detail=(
+                "Requesters cannot update case "
+                "management fields."
+            ),
         )
 
     if payload.due_date is not None:
-        due_date = normalize_datetime(payload.due_date)
+        due_date = normalize_datetime(
+            payload.due_date,
+        )
 
         if due_date < case.created_at:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Due date cannot be earlier than case creation time.",
+                detail=(
+                    "Due date cannot be earlier than "
+                    "case creation time."
+                ),
             )
 
         case.due_date = due_date
@@ -342,7 +444,10 @@ def update_case(
             case_id=case.id,
             actor_id=current_user.id,
             event_type="due_date_changed",
-            detail=f"Due date changed to {due_date.isoformat()}.",
+            detail=(
+                f"Due date changed to "
+                f"{due_date.isoformat()}."
+            ),
         )
 
     if payload.category is not None:
@@ -356,8 +461,9 @@ def update_case(
                 actor_id=current_user.id,
                 event_type="category_changed",
                 detail=(
-                    f"Category changed from {old_value} "
-                    f"to {payload.category.value}."
+                    f"Category changed from "
+                    f"{old_value} to "
+                    f"{payload.category.value}."
                 ),
             )
 
@@ -372,8 +478,9 @@ def update_case(
                 actor_id=current_user.id,
                 event_type="priority_changed",
                 detail=(
-                    f"Priority changed from {old_value} "
-                    f"to {payload.priority.value}."
+                    f"Priority changed from "
+                    f"{old_value} to "
+                    f"{payload.priority.value}."
                 ),
             )
 
@@ -393,19 +500,27 @@ def update_case(
                 actor_id=current_user.id,
                 event_type="status_changed",
                 detail=(
-                    f"Status changed from {old_value} "
-                    f"to {payload.status.value}."
+                    f"Status changed from "
+                    f"{old_value} to "
+                    f"{payload.status.value}."
                 ),
             )
 
     if payload.resolution_summary is not None:
-        case.resolution_summary = payload.resolution_summary
+        case.resolution_summary = (
+            payload.resolution_summary
+        )
 
     if case.status == StatusEnum.RESOLVED:
-        if not case.resolution_summary or not case.resolution_summary.strip():
+        if (
+            not case.resolution_summary
+            or not case.resolution_summary.strip()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A resolution summary is required.",
+                detail=(
+                    "A resolution summary is required."
+                ),
             )
 
         if case.resolved_at is None:
@@ -435,7 +550,8 @@ def reopen_case(
     reason: str,
 ) -> Case:
     """
-    Requesters may reopen a recently resolved case within seven days.
+    Requesters may reopen a recently resolved case
+    within seven days.
     """
     case = get_case_by_id(
         db=db,
@@ -445,35 +561,46 @@ def reopen_case(
     if case.requester_id != requester.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can reopen only your own cases.",
+            detail=(
+                "You can reopen only your own cases."
+            ),
         )
 
     if case.status == StatusEnum.CLOSED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Closed cases cannot be reopened by requesters.",
+            detail=(
+                "Closed cases cannot be reopened "
+                "by requesters."
+            ),
         )
 
     if case.status != StatusEnum.RESOLVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only resolved cases can be reopened.",
+            detail=(
+                "Only resolved cases can be reopened."
+            ),
         )
 
     if not reason.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A reopen reason is required.",
+            detail=(
+                "A reopen reason is required."
+            ),
         )
 
     if case.resolved_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This case has no resolution date.",
+            detail=(
+                "This case has no resolution date."
+            ),
         )
 
-    seven_days_after_resolution = case.resolved_at + timedelta(
-        days=7,
+    seven_days_after_resolution = (
+        case.resolved_at + timedelta(days=7)
     )
 
     if utc_now() > seven_days_after_resolution:
@@ -486,6 +613,7 @@ def reopen_case(
         )
 
     old_status = case.status.value
+
     case.status = StatusEnum.OPEN
     case.resolved_at = None
     case.resolution_summary = None
@@ -496,7 +624,8 @@ def reopen_case(
         actor_id=requester.id,
         event_type="case_reopened",
         detail=(
-            f"Status changed from {old_status} to Open. "
+            f"Status changed from "
+            f"{old_status} to Open. "
             f"Reason: {reason.strip()}"
         ),
     )
@@ -505,6 +634,7 @@ def reopen_case(
     db.refresh(case)
 
     return case
+
 
 def reassign_case(
     db: Session,
@@ -520,26 +650,36 @@ def reassign_case(
         case_id=case_id,
     )
 
-    new_agent = db.query(User).filter(
-        User.id == new_agent_id,
-    ).first()
+    new_agent = (
+        db.query(User)
+        .filter(User.id == new_agent_id)
+        .first()
+    )
 
     if new_agent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="The selected user does not exist.",
+            detail=(
+                "The selected user does not exist."
+            ),
         )
 
     if new_agent.role != RoleEnum.AGENT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cases can only be assigned to agents.",
+            detail=(
+                "Cases can only be assigned "
+                "to agents."
+            ),
         )
 
     if not new_agent.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cases cannot be assigned to an inactive agent.",
+            detail=(
+                "Cases cannot be assigned to "
+                "an inactive agent."
+            ),
         )
 
     old_agent_id = case.agent_id
@@ -552,7 +692,8 @@ def reassign_case(
         event_type="case_reassigned",
         detail=(
             f"Assignment changed from agent ID "
-            f"{old_agent_id} to agent ID {new_agent.id}."
+            f"{old_agent_id} to agent ID "
+            f"{new_agent.id}."
         ),
     )
 
@@ -560,6 +701,7 @@ def reassign_case(
     db.refresh(case)
 
     return case
+
 
 def get_case_counts(
     db: Session,
@@ -569,30 +711,42 @@ def get_case_counts(
     """
     current_time = utc_now()
 
-    open_count = db.query(Case).filter(
-        Case.status.in_(
-            {
-                StatusEnum.OPEN,
-                StatusEnum.IN_PROGRESS,
-                StatusEnum.WAITING_FOR_REQUESTER,
-            },
-        ),
-    ).count()
+    open_count = (
+        db.query(Case)
+        .filter(
+            Case.status.in_(
+                {
+                    StatusEnum.OPEN,
+                    StatusEnum.IN_PROGRESS,
+                    StatusEnum.WAITING_FOR_REQUESTER,
+                },
+            ),
+        )
+        .count()
+    )
 
-    overdue_count = db.query(Case).filter(
-        Case.due_date.is_not(None),
-        Case.due_date < current_time,
-        ~Case.status.in_(
-            {
-                StatusEnum.RESOLVED,
-                StatusEnum.CLOSED,
-            },
-        ),
-    ).count()
+    overdue_count = (
+        db.query(Case)
+        .filter(
+            Case.due_date.is_not(None),
+            Case.due_date < current_time,
+            ~Case.status.in_(
+                {
+                    StatusEnum.RESOLVED,
+                    StatusEnum.CLOSED,
+                },
+            ),
+        )
+        .count()
+    )
 
-    resolved_count = db.query(Case).filter(
-        Case.status == StatusEnum.RESOLVED,
-    ).count()
+    resolved_count = (
+        db.query(Case)
+        .filter(
+            Case.status == StatusEnum.RESOLVED,
+        )
+        .count()
+    )
 
     return {
         "open": open_count,
