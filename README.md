@@ -72,6 +72,44 @@ support-case-management/
 └── README.md
 ```
 
+## Technical Note
+
+### Why this stack?
+
+I chose FastAPI, PostgreSQL, SQLAlchemy, Alembic and Streamlit because they provide a practical and maintainable stack for a small business application. FastAPI provides typed request validation, dependency injection, suitable HTTP responses and automatic OpenAPI documentation. PostgreSQL is appropriate for the relational data because users, cases, messages and activity records have clear relationships. SQLAlchemy keeps database access separate from the API layer, while Alembic provides repeatable database migrations. Streamlit allowed me to build a functional browser interface quickly while keeping the focus on the main workflows and permissions.
+
+Docker Compose is used to run PostgreSQL, the FastAPI API and the Streamlit frontend together. This gives the project a reproducible local setup and avoids requiring each service to be configured manually.
+
+### How is the application organized?
+
+The backend is organized into API routes, schemas, models, core utilities and services. Routes handle HTTP requests and dependencies, schemas validate input and output, models represent database tables, and services contain business rules. This separation keeps workflow logic out of the route handlers.
+
+The frontend uses separate API-client modules for authentication, cases, messages, users and administration. Streamlit pages use these clients to communicate with the API rather than accessing the database directly. This keeps the browser layer independent from the persistence layer.
+
+### How is authorization enforced?
+
+Authorization is enforced on the backend. JWT authentication identifies the current user, and reusable role dependencies restrict access to requester, agent and administrator endpoints. Record-level checks are also applied. Requesters can view only their own cases, agents can view unassigned cases and cases assigned to themselves, and administrators can view all cases. Agents cannot update cases assigned to another agent, and only administrators can manage users or reassign cases.
+
+Internal notes are handled separately from public replies. The backend controls their visibility so requesters cannot access them even if they attempt to call the API directly.
+
+### How are workflow and activity history modeled?
+
+Cases use enum values for category, priority and status. The service layer validates status transitions instead of allowing arbitrary changes. A resolution summary is required before a case can move to `Resolved`, and my implementation assumes that a case can move to `Closed` only after it has been resolved. Requesters can reopen recently resolved cases within seven days if they provide a reason.
+
+Important changes are recorded in an activity-history table. Events include creation, assignment, reassignment, status changes, priority changes, public replies, internal notes, resolution and reopening. Each entry records the case, actor, event type, detail and timestamp. Application timestamps are stored in UTC to keep comparisons consistent across environments.
+
+### How is AI kept separate?
+
+AI triage is optional and separate from the main case-management services. It can suggest a category, priority, summary and next step based on the case title and description. The response is validated before it is displayed. If the AI configuration is empty, unavailable or returns invalid data, a local fallback is used so normal case management continues working. Suggestions are never applied automatically; the agent decides whether to use them.
+
+### Trade-offs and future improvements
+
+The main trade-off was choosing Streamlit instead of a more traditional frontend framework. Streamlit reduced development time and was sufficient for demonstrating the required workflows, but a larger production application would benefit from a dedicated frontend with stronger routing, client-side state handling and more granular user-interface controls.
+
+The hardest part was implementing record-level authorization consistently across listing, detail, assignment, messaging and updates. With more time, I would improve pagination and sorting controls in the frontend, add richer activity-history presentation, improve automated frontend testing, and add stronger service health checks and production secret management.
+
+If usage grew significantly, I would consider separating services further, adding background workers for notifications and AI requests, introducing caching for dashboard summaries, improving database indexing, and deploying the API and frontend independently. The part I am least confident about is the optional external AI integration because provider response formats, availability and operational requirements can vary. The local fallback keeps the core application usable when that integration is unavailable.
+
 ## Run with Docker
 
 From the project root, run:
