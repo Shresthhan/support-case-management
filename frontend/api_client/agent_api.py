@@ -1,8 +1,19 @@
 from .client import ApiClient
 
 
-def list_cases(api: ApiClient) -> list[dict]:
-    response = api.get("/cases")
+def list_agent_queue(
+    api: ApiClient,
+    status: str | None = None,
+) -> list[dict]:
+    params = {}
+
+    if status:
+        params["status"] = status
+
+    response = api.get(
+        "/cases/agent-queue",
+        params=params,
+    )
 
     if response.status_code != 200:
         raise ValueError(
@@ -20,37 +31,12 @@ def list_cases(api: ApiClient) -> list[dict]:
     return []
 
 
-def get_case(
+def claim_case(
     api: ApiClient,
     case_id: int,
 ) -> dict:
-    response = api.get(
-        f"/cases/{case_id}",
-    )
-
-    if response.status_code != 200:
-        raise ValueError(
-            api.error_message(response),
-        )
-
-    return response.json()
-
-
-def create_case(
-    api: ApiClient,
-    title: str,
-    description: str,
-    category: str,
-    priority: str,
-) -> dict:
     response = api.post(
-        "/cases",
-        json={
-            "title": title,
-            "description": description,
-            "category": category,
-            "priority": priority,
-        },
+        f"/cases/{case_id}/claim",
     )
 
     if response.status_code not in (200, 201):
@@ -61,16 +47,14 @@ def create_case(
     return response.json()
 
 
-def reopen_case(
+def update_case(
     api: ApiClient,
     case_id: int,
-    reason: str,
+    payload: dict,
 ) -> dict:
-    response = api.post(
-        f"/cases/{case_id}/reopen",
-        params={
-            "reason": reason,
-        },
+    response = api.patch(
+        f"/cases/{case_id}",
+        json=payload,
     )
 
     if response.status_code not in (200, 201):
