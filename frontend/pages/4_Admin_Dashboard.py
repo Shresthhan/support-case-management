@@ -1,7 +1,6 @@
 import streamlit as st
 
 from api_client.admin_api import get_case_summary
-from api_client.agent_api import update_case
 from api_client.cases_api import list_cases
 from api_client.client import ApiClient
 from api_client.users_api import create_user
@@ -15,6 +14,287 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
+
+
+def require_admin() -> None:
+    user = st.session_state.get("user")
+
+    if user is None:
+        st.warning("Please log in first.")
+        st.stop()
+
+    role = str(
+        user.get("role", "")
+    ).lower()
+
+    if role != "admin":
+        st.error(
+            "You do not have permission to view "
+            "this page."
+        )
+        st.stop()
+
+
+def create_api_client() -> ApiClient:
+    return ApiClient(
+        base_url=st.session_state.api_base_url,
+        token=st.session_state.token,
+    )
+
+
+def get_count(
+    summary: dict,
+    *keys: str,
+) -> int:
+    for key in keys:
+        value = summary.get(key)
+
+        if isinstance(value, int):
+            return value
+
+    return 0
+
+
+def build_case_label(case: dict) -> str:
+    return (
+        f"{case.get('case_number', 'Case')} "
+        f"— {case.get('title', '')}"
+    )
+
+
+def build_agent_label(user: dict) -> str:
+    return (
+        f"{user.get('email', 'Unknown')} "
+        f"(ID {user.get('id')})"
+    )
+
+
+def build_user_label(user: dict) -> str:
+    return (
+        f"{user.get('email', 'Unknown')} "
+        f"(ID {user.get('id')})"
+    )
+
+
+def assign_case_to_agent(
+    api: ApiClient,
+    case_id: int,
+    agent_id: int,
+) -> dict:
+    response = api.patch(
+        f"/cases/{case_id}/assignment",
+        json={
+            "agent_id": agent_id,
+        },
+    )
+
+    if response.status_code not in (200, 201):
+        raise ValueError(
+            api.error_message(response),
+        )
+
+    return response.json()
+
+
+def show_create_user_form(
+    api: ApiClient,
+) -> None:
+    st.subheader("Create a new user")
+
+    with st.form("create_user_form"):
+        new_email = st.text_input(
+            "Email",
+            placeholder="new.agent@example.com",
+        )
+
+        new_password = st.text_input(
+            "Temporary password",
+            type="password",
+            help=(
+                "Give this password to the user "
+                "securely."
+            ),
+        )
+
+        new_role = st.selectbox(
+            "Role",
+            options=[
+                "requester",
+                "agent",
+                "admin",
+            ],
+        )
+
+        submitted = st.form_submit_button(
+            "Create user",
+            use_container_width=True,
+        )
+
+    if not submitted:
+        return
+
+    email = new_email.strip()
+    password = new_password
+
+    if not email:
+        st.error("Email is required.")
+        return
+
+    if "@" not in email:
+        st.error(
+            "Please enter a valid email address."
+        )
+        return
+
+    if not password:
+        st.error("Password is required.")
+        return
+
+    if len(password) < 8:
+        st.error(
+            "Password must contain at least "
+            "8 characters."
+        )
+        return
+
+    try:
+        create_user(
+            api=api,
+            email=email,
+            password=password,
+            role=new_role,
+        )
+
+        st.success(
+            "User created successfully."
+        )
+        st.rerun()
+
+    except ValueError as error:
+        st.error(str(error))
+
+    except Exception:
+        st.error(
+            "Could not create the user."
+        )
+
+
+def show_user_table(
+    users: list[dict],
+) -> None:
+    if not users:
+        st.info("No users found.")
+        return
+
+    user_rows = []
+
+    for user in users:
+        user_rows.append(
+            {
+                "ID": user.get("id"),
+                "Email": user.get("email"),
+                "Role": user.get("role"),
+                "Active": user.get("is_active"),
+                "Created At": user.get("created_at"),
+            }
+        )
+
+    st.dataframe(
+        user_rows,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def show_user_edit_form(
+    api: ApiClient,
+    users: list[dict],
+) -> None:
+    if not users:
+        return
+
+    st.divider()
+    st.subheader("Change user status or role")
+
+    user_map = {
+        build_user_label(user): user
+        for user in users
+    }
+
+    selected_label = st.selectbox(
+        "Select user",
+        options=list(user_map.keys()),
+        key="admin_selected_user",
+    )
+
+    selected_user = user_map[selected_label]
+
+    role_options = [
+        "requester",
+        "agent",
+        "admin",
+    ]
+
+    current_role = str(
+        selected_user.get(
+            "role",
+            "requester",
+        )
+    ).lower()
+
+    if current_role not in role_options:
+        current_role = "requester"
+
+    with st.form("edit_user_form"):
+        selected_role = st.selectbox(
+            "Role",
+            options=role_options,
+            index=role_options.index(
+                current_role,
+            ),
+        )
+
+        selected_active = st.checkbox(
+            "Account is active",
+            value=bool(
+                selected_user.get(
+                    "is_active",
+                    False,
+                )
+            ),
+        )
+
+        submitted = st.form_submit_button(
+            "Save user changes",
+            use_container_width=True,
+        )
+
+    if not submitted:
+        return
+
+    try:
+        update_user(
+            api=api,
+            user_id=selected_user["id"],
+            payload={
+                "role": selected_role,
+                "is_active": selected_active,
+            },
+        )
+
+        st.success(
+            "User updated successfully."
+        )
+        st.rerun()
+
+    except ValueError as error:
+        st.error(str(error))
+
+    except Exception:
+        st.error(
+            "Could not update the user."
+        )
+
 
 def show_case_management(
     api: ApiClient,
@@ -145,31 +425,37 @@ def show_case_management(
         for agent in agents
     }
 
-    selected_case_label = st.selectbox(
-        "Select case",
-        options=list(case_map.keys()),
-        key="admin_management_case",
-    )
-
-    selected_case = case_map[selected_case_label]
-
-    current_agent_id = selected_case.get(
-        "agent_id",
-    )
-
-    if current_agent_id is None:
-        st.info(
-            "This case is currently unassigned."
-        )
-    else:
-        st.caption(
-            f"Current agent ID: {current_agent_id}"
+    with st.form(
+        "case_management_assignment_form",
+    ):
+        selected_case_label = st.selectbox(
+            "Select case",
+            options=list(case_map.keys()),
+            key="admin_management_case",
         )
 
-    with st.form("case_management_assignment_form"):
+        selected_case = case_map[
+            selected_case_label
+        ]
+
+        current_agent_id = selected_case.get(
+            "agent_id",
+        )
+
+        if current_agent_id is None:
+            st.info(
+                "This case is currently unassigned."
+            )
+        else:
+            st.caption(
+                f"Current agent ID: "
+                f"{current_agent_id}"
+            )
+
         selected_agent_label = st.selectbox(
             "Assign to active agent",
             options=list(agent_map.keys()),
+            key="admin_management_agent",
         )
 
         submitted = st.form_submit_button(
@@ -185,12 +471,10 @@ def show_case_management(
     ]
 
     try:
-        update_case(
+        assign_case_to_agent(
             api=api,
             case_id=selected_case["id"],
-            payload={
-                "agent_id": selected_agent_id,
-            },
+            agent_id=selected_agent_id,
         )
 
         st.success(
@@ -206,350 +490,11 @@ def show_case_management(
             "Could not save the case assignment."
         )
 
-def require_admin() -> None:
-    user = st.session_state.get("user")
-
-    if user is None:
-        st.warning("Please log in first.")
-        st.stop()
-
-    role = str(
-        user.get("role", "")
-    ).lower()
-
-    if role != "admin":
-        st.error(
-            "You do not have permission to view "
-            "this page."
-        )
-        st.stop()
-
-
-def create_api_client() -> ApiClient:
-    return ApiClient(
-        base_url=st.session_state.api_base_url,
-        token=st.session_state.token,
-    )
-
-
-def get_count(
-    summary: dict,
-    *keys: str,
-) -> int:
-    for key in keys:
-        value = summary.get(key)
-
-        if isinstance(value, int):
-            return value
-
-    return 0
-
-
-def build_case_label(case: dict) -> str:
-    return (
-        f"{case.get('case_number', 'Case')} "
-        f"— {case.get('title', '')}"
-    )
-
-
-def build_agent_label(user: dict) -> str:
-    return (
-        f"{user.get('email', 'Unknown')} "
-        f"(ID {user.get('id')})"
-    )
-
-
-def build_user_label(user: dict) -> str:
-    return (
-        f"{user.get('email', 'Unknown')} "
-        f"(ID {user.get('id')})"
-    )
-
-
-def show_create_user_form(
-    api: ApiClient,
-) -> None:
-    st.subheader("Create a new user")
-
-    with st.form("create_user_form"):
-        new_email = st.text_input(
-            "Email",
-            placeholder="new.agent@example.com",
-        )
-
-        new_password = st.text_input(
-            "Temporary password",
-            type="password",
-            help=(
-                "Give this password to the user "
-                "securely."
-            ),
-        )
-
-        new_role = st.selectbox(
-            "Role",
-            options=[
-                "requester",
-                "agent",
-                "admin",
-            ],
-        )
-
-        submitted = st.form_submit_button(
-            "Create user",
-            use_container_width=True,
-        )
-
-    if not submitted:
-        return
-
-    email = new_email.strip()
-    password = new_password
-
-    if not email:
-        st.error("Email is required.")
-        return
-
-    if "@" not in email:
-        st.error("Please enter a valid email address.")
-        return
-
-    if not password:
-        st.error("Password is required.")
-        return
-
-    if len(password) < 8:
-        st.error(
-            "Password must contain at least "
-            "8 characters."
-        )
-        return
-
-    try:
-        create_user(
-            api=api,
-            email=email,
-            password=password,
-            role=new_role,
-        )
-
-        st.success(
-            "User created successfully."
-        )
-        st.rerun()
-
-    except ValueError as error:
-        st.error(str(error))
-
-    except Exception:
-        st.error(
-            "Could not create the user."
-        )
-
-
-def show_user_table(
-    users: list[dict],
-) -> None:
-    if not users:
-        st.info("No users found.")
-        return
-
-    user_rows = []
-
-    for user in users:
-        user_rows.append(
-            {
-                "ID": user.get("id"),
-                "Email": user.get("email"),
-                "Role": user.get("role"),
-                "Active": user.get("is_active"),
-                "Created At": user.get("created_at"),
-            }
-        )
-
-    st.dataframe(
-        user_rows,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-def show_user_edit_form(
-    api: ApiClient,
-    users: list[dict],
-) -> None:
-    if not users:
-        return
-
-    st.divider()
-    st.subheader("Change user status or role")
-
-    user_map = {
-        build_user_label(user): user
-        for user in users
-    }
-
-    selected_label = st.selectbox(
-        "Select user",
-        options=list(user_map.keys()),
-    )
-
-    selected_user = user_map[selected_label]
-
-    role_options = [
-        "requester",
-        "agent",
-        "admin",
-    ]
-
-    current_role = str(
-        selected_user.get(
-            "role",
-            "requester",
-        )
-    ).lower()
-
-    if current_role not in role_options:
-        current_role = "requester"
-
-    with st.form("edit_user_form"):
-        selected_role = st.selectbox(
-            "Role",
-            options=role_options,
-            index=role_options.index(
-                current_role,
-            ),
-        )
-
-        selected_active = st.checkbox(
-            "Account is active",
-            value=bool(
-                selected_user.get(
-                    "is_active",
-                    False,
-                )
-            ),
-        )
-
-        submitted = st.form_submit_button(
-            "Save user changes",
-            use_container_width=True,
-        )
-
-    if not submitted:
-        return
-
-    try:
-        update_user(
-            api=api,
-            user_id=selected_user["id"],
-            payload={
-                "role": selected_role,
-                "is_active": selected_active,
-            },
-        )
-
-        st.success(
-            "User updated successfully."
-        )
-        st.rerun()
-
-    except ValueError as error:
-        st.error(str(error))
-
-    except Exception:
-        st.error(
-            "Could not update the user."
-        )
-
-
-def show_assignment_form(
-    api: ApiClient,
-) -> None:
-    st.subheader("Assign or reassign case")
-
-    try:
-        cases = list_cases(api)
-        agents = list_active_agents(api)
-
-    except ValueError as error:
-        st.error(str(error))
-        return
-
-    except Exception:
-        st.error(
-            "Could not load cases or agents."
-        )
-        return
-
-    if not cases:
-        st.info("No cases available.")
-        return
-
-    if not agents:
-        st.warning(
-            "No active agents found."
-        )
-        return
-
-    case_map = {
-        build_case_label(case): case["id"]
-        for case in cases
-    }
-
-    agent_map = {
-        build_agent_label(agent): agent["id"]
-        for agent in agents
-    }
-
-    with st.form("admin_assignment_form"):
-        selected_case_label = st.selectbox(
-            "Case",
-            options=list(case_map.keys()),
-        )
-
-        selected_agent_label = st.selectbox(
-            "Agent",
-            options=list(agent_map.keys()),
-        )
-
-        submitted = st.form_submit_button(
-            "Assign case",
-            use_container_width=True,
-        )
-
-    if not submitted:
-        return
-
-    case_id = case_map[selected_case_label]
-    agent_id = agent_map[selected_agent_label]
-
-    try:
-        update_case(
-            api=api,
-            case_id=case_id,
-            payload={
-                "agent_id": agent_id,
-            },
-        )
-
-        st.success(
-            "Case assigned successfully."
-        )
-        st.rerun()
-
-    except ValueError as error:
-        st.error(str(error))
-
-    except Exception:
-        st.error(
-            "Could not assign the case."
-        )
-
 
 require_admin()
 
 st.title("Admin Dashboard")
+
 st.caption(
     "Overview of support case activity "
     "and administration tools."
@@ -557,11 +502,14 @@ st.caption(
 
 api = create_api_client()
 
-tab_overview, tab_users, tab_assignment, tab_case_management = st.tabs(
+(
+    tab_overview,
+    tab_users,
+    tab_case_management,
+) = st.tabs(
     [
         "Overview",
         "Users",
-        "Assignment",
         "Case Management",
     ]
 )
@@ -694,14 +642,12 @@ with tab_users:
         st.stop()
 
     show_user_table(users)
+
     show_user_edit_form(
         api=api,
         users=users,
     )
 
-
-with tab_assignment:
-    show_assignment_form(api)
 
 with tab_case_management:
     show_case_management(api)
